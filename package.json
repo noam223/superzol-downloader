@@ -1,13 +1,13 @@
 {
   "name": "superzol-downloader",
   "version": "1.0.0",
-  "description": "Price file downloader for supermarket chains",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "postinstall": "npx playwright install --with-deps"
   },
   "dependencies": {
-    "node-fetch": "^2.6.1",
-    "playwright": "^1.44.0"
+    "playwright": "^1.44.0",
+    "node-fetch": "^2.6.7"
   }
 }
