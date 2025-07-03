@@ -1,14 +1,3 @@
-await client.query(`
-  CREATE TABLE IF NOT EXISTS stores (
-    store_id TEXT PRIMARY KEY,
-    store_name TEXT,
-    chain_id TEXT,
-    chain_name TEXT,
-    address TEXT,
-    city TEXT,
-    zip_code TEXT
-  );
-`);
 const fs = require('fs');
 const path = require('path');
 const xml2js = require('xml2js');
@@ -20,7 +9,17 @@ const client = new Client({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
-
+await client.query(`
+  CREATE TABLE IF NOT EXISTS stores (
+    store_id TEXT PRIMARY KEY,
+    store_name TEXT,
+    chain_id TEXT,
+    chain_name TEXT,
+    address TEXT,
+    city TEXT,
+    zip_code TEXT
+  );
+`);
 // תיקיית הבסיס של ההורדות
 const baseDir = path.join(__dirname, 'downloads');
 
