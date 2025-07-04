@@ -56,7 +56,7 @@ const loadPriceFullToPostgres = async () => {
   }
 
   await client.end();
-  console.log(`✅ Loaded ${items.length} products into price_full`);
+  console.log(`✅ Loaded ${items.length} products into price_full_clean`);
 };
 
 loadPriceFullToPostgres().catch(err => {
