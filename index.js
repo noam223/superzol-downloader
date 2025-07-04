@@ -4,6 +4,12 @@ const fetch = require('node-fetch');
 const { chromium } = require('playwright');
 const logins = require('./logins.json');
 
+// 🛑 תנאי להשבתת ההורדה לפי משתנה סביבה
+if (process.env.SKIP_DOWNLOAD === 'true') {
+  console.log('🚫 הורדת הקבצים הושבתה זמנית על ידי משתנה סביבה');
+  process.exit(0);
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true });
 
