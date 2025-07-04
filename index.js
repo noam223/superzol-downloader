@@ -4,10 +4,10 @@ const { parseStringPromise } = require('xml2js');
 const { Client } = require('pg');
 const zlib = require('zlib');
 
-// נתיב לקובץ .gz
-const filePath = './PriceFull7290058140886-028-202506250010.gz'; // שנה לפי הצורך
+// 🧠 נתיב לקובץ ה־.gz
+const filePath = './PriceFull7290058140886-028-202506250010.gz'; // עדכן לפי הצורך
 
-// חילוץ תאריך מהשם
+// 🧠 חילוץ תאריך מהשם (YYYY-MM-DD HH:mm:00)
 const extractDateFromFilename = (filename) => {
   const match = filename.match(/(\d{8})(\d{4})/);
   if (!match) return null;
@@ -17,21 +17,25 @@ const extractDateFromFilename = (filename) => {
 
 const loadPriceFullToPostgres = async () => {
   const client = new Client({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: process.env.DATABASE_URL, // מגיע אוטומטית מ־Railway
     ssl: { rejectUnauthorized: false }
   });
 
   await client.connect();
 
+  // 🧠 שלב 1: קריאה ופיענוח
   const buffer = fs.readFileSync(filePath);
   const xml = zlib.gunzipSync(buffer).toString('utf8');
   const result = await parseStringPromise(xml);
 
-  const items = result?.Root?.Item || [];
+  const items = result?.Root?.Items?.[0]?.Item || [];
   const chainId = result?.Root?.ChainId?.[0] || null;
   const storeId = result?.Root?.StoreId?.[0] || null;
   const updateDate = extractDateFromFilename(path.basename(filePath));
 
+  console.log(`📦 Found ${items.length} items to insert`);
+
+  // 🧠 שלב 2: לולאה והכנסה
   for (const item of items) {
     const values = {
       product_id: item.ItemCode?.[0] || null,
@@ -39,13 +43,13 @@ const loadPriceFullToPostgres = async () => {
       chain_id: chainId,
       item_name: item.ItemName?.[0] || null,
       manufacturer_name: item.ManufacturerName?.[0] || null,
-      manufacturer_item_id: item.ManufacturerItemCode?.[0] || null,
-      unit_qty: parseFloat(item.QuantityInPackage?.[0] || 0),
+      manufacturer_item_id: item.ManufacturerItemDesc?.[0] || null,
+      unit_qty: parseFloat(item.UnitQty?.[0] || 0),
       quantity: parseInt(item.Quantity?.[0] || 0),
       unit_of_measure: item.UnitOfMeasure?.[0] || null,
       b_is_weighted: item.bIsWeighted?.[0] === '1',
       item_price: parseFloat(item.ItemPrice?.[0] || 0),
-      unit_price: parseFloat(item.UnitOfMeasurePrice?.[0] || 0),
+      unit_price: parseFloat(item.BisPrice?.[0] || 0),
       update_date: updateDate,
     };
 
@@ -67,4 +71,7 @@ const loadPriceFullToPostgres = async () => {
   console.log(`✅ Loaded ${items.length} products into price_full`);
 };
 
-loadPriceFullToPostgres().catch(console.error);
+// ✅ הפעלה
+loadPriceFullToPostgres().catch(err => {
+  console.error('❌ Error:', err.message);
+});
