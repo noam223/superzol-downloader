@@ -6,10 +6,10 @@
     "start": "node index.js",
     "postinstall": "npx playwright install --with-deps"
   },
-  "dependencies": {
-    "playwright": "^1.44.0",
-    "node-fetch": "^2.6.7",
-    "xml2js": "^0.6.2",
-    "pg": "^8.11.3"
-  }
+"dependencies": {
+  "playwright": "^1.44.0",
+  "node-fetch": "^2.6.7",
+  "xml2js": "^0.6.2",
+  "pg": "^8.11.1"
+}
 }
