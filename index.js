@@ -5,7 +5,7 @@ const { Client } = require('pg');
 const zlib = require('zlib');
 
 // נתיב לקובץ .gz
-const filePath = './PriceFull7290058140886-028-202506250010.xml.gz'; // שנה לפי הצורך
+const filePath = './PriceFull7290058140886-028-202506250010.gz'; // שנה לפי הצורך
 
 // חילוץ תאריך מהשם
 const extractDateFromFilename = (filename) => {
