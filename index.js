@@ -54,7 +54,7 @@ const loadPriceFullToPostgres = async () => {
     };
 
     await client.query(`
-      INSERT INTO price_full (
+      INSERT INTO price_full2 (
         product_id, store_id, chain_id, item_name, manufacturer_name,
         manufacturer_item_id, unit_qty, quantity, unit_of_measure,
         b_is_weighted, item_price, unit_price, update_date
@@ -68,7 +68,7 @@ const loadPriceFullToPostgres = async () => {
   }
 
   await client.end();
-  console.log(`✅ Loaded ${items.length} products into price_full`);
+  console.log(`✅ Loaded ${items.length} products into `);
 };
 
 // ✅ הפעלה
