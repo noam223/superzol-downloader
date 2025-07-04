@@ -17,13 +17,12 @@ const extractDateFromFilename = (filename) => {
 
 const loadPriceFullToPostgres = async () => {
   const client = new Client({
-    connectionString: process.env.DATABASE_URL, // מוגדר אוטומטית ב־Railway
+    connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
   });
 
   await client.connect();
 
-  // קריאה ופתיחת הקובץ
   const buffer = fs.readFileSync(filePath);
   const xml = zlib.gunzipSync(buffer).toString('utf8');
   const result = await parseStringPromise(xml);
@@ -40,13 +39,13 @@ const loadPriceFullToPostgres = async () => {
       chain_id: chainId,
       item_name: item.ItemName?.[0] || null,
       manufacturer_name: item.ManufacturerName?.[0] || null,
-      manufacturer_item_id: item.ManufacturerItemDesc?.[0] || null,
-      unit_qty: parseFloat(item.UnitQty?.[0] || 0),
+      manufacturer_item_id: item.ManufacturerItemCode?.[0] || null,
+      unit_qty: parseFloat(item.QuantityInPackage?.[0] || 0),
       quantity: parseInt(item.Quantity?.[0] || 0),
       unit_of_measure: item.UnitOfMeasure?.[0] || null,
       b_is_weighted: item.bIsWeighted?.[0] === '1',
       item_price: parseFloat(item.ItemPrice?.[0] || 0),
-      unit_price: parseFloat(item.BisPrice?.[0] || 0),
+      unit_price: parseFloat(item.UnitOfMeasurePrice?.[0] || 0),
       update_date: updateDate,
     };
 
