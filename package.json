@@ -1,23 +1,15 @@
 {
-  "name": "superzol-fetcher",
+  "name": "superzol-downloader",
   "version": "1.0.0",
-  "description": "מערכת הורדה וניתוח קבצי מחירים ומבצעים לפי רשתות וסניפים",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+  "start": "node download.js",
+    "postinstall": "npx playwright install --with-deps"
   },
-  "dependencies": {
-    "adm-zip": "^0.5.10",
-    "axios": "^1.6.8",
-    "cheerio": "^1.0.0-rc.12",
-    "dayjs": "^1.11.10",
-    "dotenv": "^16.4.5",
-    "fast-xml-parser": "^4.3.5",
-    "form-data": "^4.0.0",
-    "pg": "^8.11.3",
-    "playwright": "^1.44.0"
-  },
-  "engines": {
-    "node": ">=20.18.1"
-  }
+"dependencies": {
+  "playwright": "^1.44.0",
+  "node-fetch": "^2.6.7",
+  "xml2js": "^0.6.2",
+  "pg": "^8.11.1"
+}
 }
