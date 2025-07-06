@@ -41,10 +41,10 @@ const fetchAndProcessFiles = async () => {
   await page.goto(`${BASE_URL}/login`);
   await page.fill('input[name=username]', username);
   await page.fill('input[name=password]', password);
-  await Promise.all([
-    page.waitForNavigation(),
-    page.click('button[type=submit']),
-  ]);
+await Promise.all([
+  page.waitForNavigation(),
+  page.click('button[type=submit]')
+]);
 
   await page.goto(`${BASE_URL}/files`);
   const links = await page.$$eval('a', (els) =>
