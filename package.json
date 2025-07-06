@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "מערכת הורדה וניתוח קבצי מחירים ומבצעים לפי רשתות וסניפים",
   "main": "index.js",
-  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
