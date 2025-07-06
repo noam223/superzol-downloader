@@ -14,7 +14,7 @@ const BASE_URL = 'https://url.publishedprices.co.il';
 const getLatestFiles = (fileList) => {
   const map = new Map();
   for (const file of fileList) {
-    const match = file.fname.match(/^(pricefull|price|promofull|promo|price)(\d+)-(\d+)-(\d{12})\.gz$/i);
+    const match = file.fname.match(/^(pricefull|price|promofull|promo)(\d+)-(\d+)-(\d{12})\.gz$/i);
     if (!match) continue;
     const [_, type, chainId, storeId, datetime] = match;
     const key = `${type}_${storeId}`;
@@ -147,6 +147,53 @@ const getLatestFiles = (fileList) => {
 
           if (i === 0) console.log(`📦 First product inserted to ${table}: ${item.ItemName}`);
         }
+      } 
+      
+      else if (type === 'promofull' || type === 'promo') {
+        let promotions = json?.Root?.Promotions?.Promotion || [];
+        if (!Array.isArray(promotions)) promotions = [promotions];
+
+        let updatedCount = 0;
+
+        for (const promo of promotions) {
+          let products = promo?.PromotionItems?.Item || [];
+          if (!Array.isArray(products)) products = [products];
+
+          for (const product of products) {
+            await client.query(
+              `UPDATE ${table} SET
+                PromotionId = $1,
+                PromotionDescription = $2,
+                PromotionUpdateDate = $3,
+                PromotionStartDate = $4,
+                PromotionStartHour = $5,
+                PromotionEndDate = $6,
+                PromotionEndHour = $7,
+                MinQty = $8,
+                DiscountedPrice = $9,
+                DiscountedPricePerMida = $10,
+                MinNoOfItemOfered = $11
+              WHERE product_id = $12`,
+              [
+                promo.PromotionId,
+                promo.PromotionDescription,
+                promo.PromotionUpdateDate,
+                promo.PromotionStartDate,
+                promo.PromotionStartHour,
+                promo.PromotionEndDate,
+                promo.PromotionEndHour,
+                promo.MinQty,
+                promo.DiscountedPrice,
+                promo.DiscountedPricePerMida,
+                promo.MinNoOfItemOfered,
+                product.ItemCode,
+              ]
+            );
+            updatedCount++;
+          }
+        }
+
+        console.log(`🔥 Updated ${updatedCount} promotion items in table ${table}`);
       }
     }
 
