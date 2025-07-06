@@ -1,164 +1,199 @@
-// קובץ ראשי שמבצע הורדה + פענוח + טעינה למסד
-const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
 const zlib = require('zlib');
-const { XMLParser } = require('fast-xml-parser');
+const { chromium } = require('playwright');
 const { Client } = require('pg');
+const { XMLParser } = require('fast-xml-parser');
 const dotenv = require('dotenv');
 dotenv.config();
 
+const logins = require('./logins.json');
 const parser = new XMLParser({ ignoreAttributes: false });
 const BASE_URL = 'https://url.publishedprices.co.il';
-const username = 'politzer';
-const password = '';
-
-const client = new Client({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
 
 const getLatestFiles = (fileList) => {
   const map = new Map();
-
   for (const file of fileList) {
-    const match = file.match(/^(pricefull|price|promofull|promo)(\d+)-(\d+)-([\d]{12})\.gz$/i);
+    const match = file.fname.match(/^(pricefull|price|promofull|promo)(\d+)-(\d+)-(\d{12})\.gz$/i);
     if (!match) continue;
     const [_, type, chainId, storeId, datetime] = match;
     const key = `${type}_${storeId}`;
     const existing = map.get(key);
     if (!existing || datetime > existing.datetime) {
-      map.set(key, { file, type: type.toLowerCase(), chainId, storeId, datetime });
+      map.set(key, { ...file, type: type.toLowerCase(), chainId, storeId, datetime });
     }
   }
-
   return Array.from(map.values());
 };
 
-const fetchAndProcessFiles = async () => {
-  await client.connect();
+(async () => {
   const browser = await chromium.launch();
-  const page = await browser.newPage();
+  const client = new Client({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+  });
+  await client.connect();
 
-  await page.goto(`${BASE_URL}/login`);
-  await page.fill('input[name=username]', username);
-  await page.fill('input[name=password]', password);
-await Promise.all([
-  page.waitForNavigation(),
-  page.click('button[type=submit]')
-]);
+  for (const { username, password } of logins) {
+    console.log(`🔐 Logging in as ${username}...`);
+    const context = await browser.newContext();
+    const page = await context.newPage();
 
-  await page.goto(`${BASE_URL}/files`);
-  const links = await page.$$eval('a', (els) =>
-    els.map((el) => el.getAttribute('href')).filter((x) => x && /\.gz$/i.test(x))
-  );
+    try {
+      // התחברות
+      await page.goto(`${BASE_URL}/login`);
+      await page.fill('input[name="username"]', username);
+      await page.fill('input[name="password"]', password || '');
+      await Promise.all([
+        page.waitForNavigation(),
+        page.click('button[type="submit"]'),
+      ]);
 
-  const filtered = links.filter((name) =>
-    /^(price|promo|pricefull|promofull)/i.test(name)
-  );
-  const latestFiles = getLatestFiles(filtered);
+      // קבלת טוקנים
+      const cookie = (await context.cookies()).find(c => c.name === 'cftpSID');
+      const csrf = await page.getAttribute('meta[name="csrftoken"]', 'content');
 
-  for (const { file, type, chainId, storeId } of latestFiles) {
-    const url = `${BASE_URL}/${file}`;
-    console.log(`⬇️  Downloading: ${file}`);
+      console.log(`📁 Fetching file list for ${username}...`);
 
-    const response = await page.goto(url);
-    const buffer = await response.body();
-    const xml = zlib.gunzipSync(buffer).toString('utf8');
-    const json = parser.parse(xml);
+      const res = await page.request.post(`${BASE_URL}/file/json/dir`, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        },
+        form: {
+          sEcho: '1',
+          iColumns: '5',
+          sColumns: ',,,,',
+          iDisplayStart: '0',
+          iDisplayLength: '100000',
+          mDataProp_0: 'fname',
+          mDataProp_1: 'typeLabel',
+          mDataProp_2: 'size',
+          mDataProp_3: 'ftime',
+          mDataProp_4: '',
+          sSearch: '',
+          bRegex: 'false',
+          iSortingCols: '0',
+          cd: '/',
+          csrftoken: csrf,
+        },
+      });
 
-    const table = `products_${chainId}_${storeId}`;
+      const fileList = (await res.json()).aaData || [];
+      const latestFiles = getLatestFiles(fileList);
 
-    if (type === 'pricefull' || type === 'price') {
-      const items = json?.Root?.Items?.Item || [];
-      const storeName = json?.Root?.StoreName || 'Unknown';
+      for (const { fname, type, chainId, storeId } of latestFiles) {
+        const fileUrl = `${BASE_URL}/file/d/${fname}`;
+        console.log(`⬇️ Downloading ${fname}`);
 
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS ${table} (
-          product_id TEXT,
-          store_id TEXT,
-          chain_id TEXT,
-          item_name TEXT,
-          manufacturer_name TEXT,
-          manufacturer_item_id TEXT,
-          unit_qty TEXT,
-          quantity REAL,
-          unit_of_measure TEXT,
-          b_is_weighted BOOLEAN,
-          item_price REAL,
-          unit_price REAL,
-          price_update_date TEXT,
-          PromotionId TEXT,
-          PromotionDescription TEXT,
-          PromotionUpdateDate TEXT,
-          PromotionStartDate TEXT,
-          PromotionStartHour TEXT,
-          PromotionEndDate TEXT,
-          PromotionEndHour TEXT,
-          MinQty TEXT,
-          DiscountedPrice TEXT,
-          DiscountedPricePerMida TEXT,
-          MinNoOfItemOfered TEXT,
-          store_name TEXT
-        );
-      `);
+        const fetchRes = await require('node-fetch')(fileUrl, {
+          headers: {
+            Cookie: `cftpSID=${cookie.value}`,
+          },
+        });
 
-      for (const item of items) {
-        const values = [
-          item.ItemCode, storeId, chainId, item.ItemName, item.ManufacturerName,
-          item.ManufacturerItemDescription, item.UnitQty, parseFloat(item.Quantity || 0),
-          item.UnitOfMeasure, item.bIsWeighted === '1', parseFloat(item.ItemPrice || 0),
-          parseFloat(item.UnitOfMeasurePrice || 0), item.PriceUpdateDate || null,
-          null, null, null, null, null, null, null, null, null, storeName
-        ];
+        const buffer = await fetchRes.buffer();
+        const xml = zlib.gunzipSync(buffer).toString('utf8');
+        const json = parser.parse(xml);
 
-        await client.query(
-          `INSERT INTO ${table} VALUES (${values.map((_, i) => `$${i + 1}`).join(',')})`,
-          values
-        );
-      }
-    } else if (type === 'promofull' || type === 'promo') {
-      const promotions = json?.Root?.Promotions?.Promotion || [];
+        const table = `products_${chainId}_${storeId}`;
 
-      for (const promo of promotions) {
-        const promoId = promo.PromotionId;
-        const products = promo?.PromotionItems?.Item || [];
+        if (type === 'pricefull' || type === 'price') {
+          const items = json?.Root?.Items?.Item || [];
+          const storeName = json?.Root?.StoreName || 'Unknown';
 
-        for (const product of products) {
-          await client.query(
-            `UPDATE ${table} SET
-              PromotionId = $1,
-              PromotionDescription = $2,
-              PromotionUpdateDate = $3,
-              PromotionStartDate = $4,
-              PromotionStartHour = $5,
-              PromotionEndDate = $6,
-              PromotionEndHour = $7,
-              MinQty = $8,
-              DiscountedPrice = $9,
-              DiscountedPricePerMida = $10,
-              MinNoOfItemOfered = $11
-            WHERE product_id = $12`,
-            [
-              promo.PromotionId,
-              promo.PromotionDescription,
-              promo.PromotionUpdateDate,
-              promo.PromotionStartDate,
-              promo.PromotionStartHour,
-              promo.PromotionEndDate,
-              promo.PromotionEndHour,
-              promo.MinQty,
-              promo.DiscountedPrice,
-              promo.DiscountedPricePerMida,
-              promo.MinNoOfItemOfered,
-              product.ItemCode,
-            ]
-          );
+          await client.query(`
+            CREATE TABLE IF NOT EXISTS ${table} (
+              product_id TEXT,
+              store_id TEXT,
+              chain_id TEXT,
+              item_name TEXT,
+              manufacturer_name TEXT,
+              manufacturer_item_id TEXT,
+              unit_qty TEXT,
+              quantity REAL,
+              unit_of_measure TEXT,
+              b_is_weighted BOOLEAN,
+              item_price REAL,
+              unit_price REAL,
+              price_update_date TEXT,
+              PromotionId TEXT,
+              PromotionDescription TEXT,
+              PromotionUpdateDate TEXT,
+              PromotionStartDate TEXT,
+              PromotionStartHour TEXT,
+              PromotionEndDate TEXT,
+              PromotionEndHour TEXT,
+              MinQty TEXT,
+              DiscountedPrice TEXT,
+              DiscountedPricePerMida TEXT,
+              MinNoOfItemOfered TEXT,
+              store_name TEXT
+            );
+          `);
+
+          for (const item of items) {
+            const values = [
+              item.ItemCode, storeId, chainId, item.ItemName, item.ManufacturerName,
+              item.ManufacturerItemDescription, item.UnitQty, parseFloat(item.Quantity || 0),
+              item.UnitOfMeasure, item.bIsWeighted === '1', parseFloat(item.ItemPrice || 0),
+              parseFloat(item.UnitOfMeasurePrice || 0), item.PriceUpdateDate || null,
+              null, null, null, null, null, null, null, null, null, storeName
+            ];
+
+            await client.query(
+              `INSERT INTO ${table} VALUES (${values.map((_, i) => `$${i + 1}`).join(',')})`,
+              values
+            );
+          }
+        } else if (type === 'promofull' || type === 'promo') {
+          const promotions = json?.Root?.Promotions?.Promotion || [];
+
+          for (const promo of promotions) {
+            const promoId = promo.PromotionId;
+            const products = promo?.PromotionItems?.Item || [];
+
+            for (const product of products) {
+              await client.query(
+                `UPDATE ${table} SET
+                  PromotionId = $1,
+                  PromotionDescription = $2,
+                  PromotionUpdateDate = $3,
+                  PromotionStartDate = $4,
+                  PromotionStartHour = $5,
+                  PromotionEndDate = $6,
+                  PromotionEndHour = $7,
+                  MinQty = $8,
+                  DiscountedPrice = $9,
+                  DiscountedPricePerMida = $10,
+                  MinNoOfItemOfered = $11
+                WHERE product_id = $12`,
+                [
+                  promo.PromotionId,
+                  promo.PromotionDescription,
+                  promo.PromotionUpdateDate,
+                  promo.PromotionStartDate,
+                  promo.PromotionStartHour,
+                  promo.PromotionEndDate,
+                  promo.PromotionEndHour,
+                  promo.MinQty,
+                  promo.DiscountedPrice,
+                  promo.DiscountedPricePerMida,
+                  promo.MinNoOfItemOfered,
+                  product.ItemCode,
+                ]
+              );
+            }
+          }
         }
       }
+
+      await context.close();
+    } catch (err) {
+      console.error(`❌ Error with ${username}:`, err);
     }
   }
 
   await client.end();
   await browser.close();
-};
-
-fetchAndProcessFiles().catch(console.error);
+  console.log('🎉 All done!');
+})();
