@@ -1,9 +1,9 @@
 // קובץ ראשי שמבצע הורדה + פענוח + טעינה למסד
-import { launch } from 'playwright';
-import zlib from 'zlib';
-import { XMLParser } from 'fast-xml-parser';
-import { Client } from 'pg';
-import dotenv from 'dotenv';
+const { chromium } = require('playwright');
+const zlib = require('zlib');
+const { XMLParser } = require('fast-xml-parser');
+const { Client } = require('pg');
+const dotenv = require('dotenv');
 dotenv.config();
 
 const parser = new XMLParser({ ignoreAttributes: false });
@@ -35,19 +35,25 @@ const getLatestFiles = (fileList) => {
 
 const fetchAndProcessFiles = async () => {
   await client.connect();
-  const browser = await launch();
+  const browser = await chromium.launch();
   const page = await browser.newPage();
 
   await page.goto(`${BASE_URL}/login`);
   await page.fill('input[name=username]', username);
   await page.fill('input[name=password]', password);
-  await page.click('button[type=submit]');
-  await page.waitForNavigation();
+  await Promise.all([
+    page.waitForNavigation(),
+    page.click('button[type=submit']),
+  ]);
 
   await page.goto(`${BASE_URL}/files`);
-  const links = await page.$$eval('a', (els) => els.map((el) => el.getAttribute('href')).filter((x) => x && /\.gz$/i.test(x)));
+  const links = await page.$$eval('a', (els) =>
+    els.map((el) => el.getAttribute('href')).filter((x) => x && /\.gz$/i.test(x))
+  );
 
-  const filtered = links.filter((name) => /^(price|promo|pricefull|promofull)/i.test(name));
+  const filtered = links.filter((name) =>
+    /^(price|promo|pricefull|promofull)/i.test(name)
+  );
   const latestFiles = getLatestFiles(filtered);
 
   for (const { file, type, chainId, storeId } of latestFiles) {
@@ -59,10 +65,11 @@ const fetchAndProcessFiles = async () => {
     const xml = zlib.gunzipSync(buffer).toString('utf8');
     const json = parser.parse(xml);
 
+    const table = `products_${chainId}_${storeId}`;
+
     if (type === 'pricefull' || type === 'price') {
       const items = json?.Root?.Items?.Item || [];
       const storeName = json?.Root?.StoreName || 'Unknown';
-      const table = `products_${chainId}_${storeId}`;
 
       await client.query(`
         CREATE TABLE IF NOT EXISTS ${table} (
@@ -103,18 +110,21 @@ const fetchAndProcessFiles = async () => {
           null, null, null, null, null, null, null, null, null, storeName
         ];
 
-        await client.query(`INSERT INTO ${table} VALUES (${values.map((_, i) => `$${i + 1}`).join(',')})`, values);
+        await client.query(
+          `INSERT INTO ${table} VALUES (${values.map((_, i) => `$${i + 1}`).join(',')})`,
+          values
+        );
       }
     } else if (type === 'promofull' || type === 'promo') {
-      const items = json?.Root?.Promotion || [];
-      for (const promo of items) {
+      const promotions = json?.Root?.Promotions?.Promotion || [];
+
+      for (const promo of promotions) {
         const promoId = promo.PromotionId;
-        const products = promo.Items?.Item || [];
-        const table = `products_${chainId}_${storeId}`;
+        const products = promo?.PromotionItems?.Item || [];
 
         for (const product of products) {
-          await client.query(`
-            UPDATE ${table} SET
+          await client.query(
+            `UPDATE ${table} SET
               PromotionId = $1,
               PromotionDescription = $2,
               PromotionUpdateDate = $3,
@@ -126,21 +136,22 @@ const fetchAndProcessFiles = async () => {
               DiscountedPrice = $9,
               DiscountedPricePerMida = $10,
               MinNoOfItemOfered = $11
-            WHERE product_id = $12
-          `, [
-            promo.PromotionId,
-            promo.PromotionDescription,
-            promo.UpdateDate,
-            promo.StartDate,
-            promo.StartHour,
-            promo.EndDate,
-            promo.EndHour,
-            promo.MinQty,
-            promo.DiscountedPrice,
-            promo.DiscountedPricePerMida,
-            promo.MinNoOfItemOfered,
-            product.ItemCode
-          ]);
+            WHERE product_id = $12`,
+            [
+              promo.PromotionId,
+              promo.PromotionDescription,
+              promo.PromotionUpdateDate,
+              promo.PromotionStartDate,
+              promo.PromotionStartHour,
+              promo.PromotionEndDate,
+              promo.PromotionEndHour,
+              promo.MinQty,
+              promo.DiscountedPrice,
+              promo.DiscountedPricePerMida,
+              promo.MinNoOfItemOfered,
+              product.ItemCode,
+            ]
+          );
         }
       }
     }
