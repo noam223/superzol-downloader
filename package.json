@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "import": "node import_to_firestore.js",
     "postinstall": "npx playwright install --with-deps"
   },
   "dependencies": {
