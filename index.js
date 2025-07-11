@@ -1,7 +1,6 @@
 // index.js – גרסה מלאה שיודעת לעבד גם Price וגם Promo
 
 import fs from 'fs';
-import path from 'path';
 import zlib from 'zlib';
 import { chromium } from 'playwright';
 import { Client } from 'pg';
@@ -82,81 +81,88 @@ const getLatestFiles = (fileList) => {
       const latestFiles = getLatestFiles(fileList);
 
       for (const { fname, type, chainId, storeId } of latestFiles) {
-        const fileUrl = `${BASE_URL}/file/d/${fname}`;
-        console.log(`⬇️ Downloading ${fname}`);
+        try {
+          const fileUrl = `${BASE_URL}/file/d/${fname}`;
+          console.log(`⬇️ Downloading ${fname}`);
 
-        const fetchRes = await require('node-fetch')(fileUrl, {
-          headers: {
-            Cookie: `cftpSID=${cookie.value}`,
-          },
-        });
+          const fetchRes = await import('node-fetch').then(m => m.default)(fileUrl, {
+            headers: {
+              Cookie: `cftpSID=${cookie.value}`,
+            },
+          });
 
-        const buffer = await fetchRes.buffer();
-        const xml = zlib.gunzipSync(buffer).toString('utf8');
-        const json = parser.parse(xml);
-        const table = `products_${chainId}_${storeId}`;
+          const buffer = await fetchRes.buffer();
+          const xml = zlib.gunzipSync(buffer).toString('utf8');
+          const json = parser.parse(xml);
+          const table = `products_${chainId}_${storeId}`;
 
-        if (type.toLowerCase().startsWith('price')) {
-          let items = json?.Root?.Items?.Item || [];
-          if (!Array.isArray(items)) items = [items];
-          const storeName = json?.Root?.StoreName || 'Unknown';
+          if (type.toLowerCase().startsWith('price')) {
+            let items = json?.Root?.Items?.Item || [];
+            if (!Array.isArray(items)) items = [items];
+            const storeName = json?.Root?.StoreName || 'Unknown';
 
-          await client.query(`
-            CREATE TABLE IF NOT EXISTS ${table} (
-              product_id TEXT,
-              store_id TEXT,
-              chain_id TEXT,
-              item_name TEXT,
-              manufacturer_name TEXT,
-              manufacturer_item_id TEXT,
-              unit_qty TEXT,
-              quantity REAL,
-              unit_of_measure TEXT,
-              b_is_weighted BOOLEAN,
-              item_price REAL,
-              unit_price REAL,
-              price_update_date TEXT,
-              PromotionId TEXT,
-              PromotionDescription TEXT,
-              PromotionUpdateDate TEXT,
-              PromotionStartDate TEXT,
-              PromotionStartHour TEXT,
-              PromotionEndDate TEXT,
-              PromotionEndHour TEXT,
-              MinQty TEXT,
-              DiscountedPrice TEXT,
-              DiscountedPricePerMida TEXT,
-              MinNoOfItemOfered TEXT,
-              store_name TEXT
-            );
-          `);
+            await client.query(`
+              CREATE TABLE IF NOT EXISTS ${table} (
+                product_id TEXT,
+                store_id TEXT,
+                chain_id TEXT,
+                item_name TEXT,
+                manufacturer_name TEXT,
+                manufacturer_item_id TEXT,
+                unit_qty TEXT,
+                quantity REAL,
+                unit_of_measure TEXT,
+                b_is_weighted BOOLEAN,
+                item_price REAL,
+                unit_price REAL,
+                price_update_date TEXT,
+                PromotionId TEXT,
+                PromotionDescription TEXT,
+                PromotionUpdateDate TEXT,
+                PromotionStartDate TEXT,
+                PromotionStartHour TEXT,
+                PromotionEndDate TEXT,
+                PromotionEndHour TEXT,
+                MinQty TEXT,
+                DiscountedPrice TEXT,
+                DiscountedPricePerMida TEXT,
+                MinNoOfItemOfered TEXT,
+                store_name TEXT
+              );
+            `);
 
-          for (const item of items) {
-            const values = [
-              item.ItemCode, storeId, chainId, item.ItemName, item.ManufacturerName,
-              item.ManufacturerItemDescription, item.UnitQty, parseFloat(item.Quantity || 0),
-              item.UnitOfMeasure, item.bIsWeighted === '1', parseFloat(item.ItemPrice || 0),
-              parseFloat(item.UnitOfMeasurePrice || 0), item.PriceUpdateDate || null,
-              null, null, null, null, null, null, null, null, null, storeName
-            ];
+            for (const item of items) {
+              const values = [
+                item.ItemCode, storeId, chainId, item.ItemName, item.ManufacturerName,
+                item.ManufacturerItemDescription, item.UnitQty, parseFloat(item.Quantity || 0),
+                item.UnitOfMeasure, item.bIsWeighted === '1', parseFloat(item.ItemPrice || 0),
+                parseFloat(item.UnitOfMeasurePrice || 0), item.PriceUpdateDate || null,
+                null, null, null, null, null, null, null, null, null, storeName
+              ];
 
-            await client.query(
-              `INSERT INTO ${table} VALUES (${values.map((_, i) => `$${i + 1}`).join(',')})`,
-              values
-            );
-          }
-          console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
+              await client.query(
+                `INSERT INTO ${table} VALUES (${values.map((_, i) => `$${i + 1}`).join(',')})`,
+                values
+              );
+            }
 
-        } else if (type.toLowerCase().startsWith('promo')) {
-          let promotions = json?.Root?.Promotions?.Promotion || [];
-          if (!Array.isArray(promotions)) promotions = [promotions];
-          let updated = 0;
-          for (const promo of promotions) {
-            let products = promo?.PromotionItems?.Item || [];
-            if (!Array.isArray(products)) products = [products];
-            for (const product of products) {
-              await client.query(`
-                UPDATE ${table} SET
+            // ניקוי זיכרון
+            items = null;
+            global.gc?.();
+
+            console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
+
+          } else if (type.toLowerCase().startsWith('promo')) {
+            let promotions = json?.Root?.Promotions?.Promotion || [];
+            if (!Array.isArray(promotions)) promotions = [promotions];
+            let updated = 0;
+
+            for (const promo of promotions) {
+              let products = promo?.PromotionItems?.Item || [];
+              if (!Array.isArray(products)) products = [products];
+
+              for (const product of products) {
+                await client.query(`UPDATE ${table} SET
                   PromotionId = $1,
                   PromotionDescription = $2,
                   PromotionUpdateDate = $3,
@@ -168,31 +174,40 @@ const getLatestFiles = (fileList) => {
                   DiscountedPrice = $9,
                   DiscountedPricePerMida = $10,
                   MinNoOfItemOfered = $11
-                WHERE product_id = $12
-              `, [
-                promo.PromotionId,
-                promo.PromotionDescription,
-                promo.PromotionUpdateDate,
-                promo.PromotionStartDate,
-                promo.PromotionStartHour,
-                promo.PromotionEndDate,
-                promo.PromotionEndHour,
-                promo.MinQty,
-                promo.DiscountedPrice,
-                promo.DiscountedPricePerMida,
-                promo.MinNoOfItemOfered,
-                product.ItemCode
-              ]);
-              updated++;
+                  WHERE product_id = $12
+                `, [
+                  promo.PromotionId,
+                  promo.PromotionDescription,
+                  promo.PromotionUpdateDate,
+                  promo.PromotionStartDate,
+                  promo.PromotionStartHour,
+                  promo.PromotionEndDate,
+                  promo.PromotionEndHour,
+                  promo.MinQty,
+                  promo.DiscountedPrice,
+                  promo.DiscountedPricePerMida,
+                  promo.MinNoOfItemOfered,
+                  product.ItemCode
+                ]);
+                updated++;
+              }
             }
+
+            // ניקוי זיכרון
+            promotions = null;
+            global.gc?.();
+
+            console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
           }
-          console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
+
+        } catch (err) {
+          console.error(`❌ Error in file ${fname}:`, err.message);
         }
       }
 
       await context.close();
     } catch (err) {
-      console.error(`❌ Error with ${username}:`, err);
+      console.error(`❌ Error with ${username}:`, err.message);
     }
   }
 
