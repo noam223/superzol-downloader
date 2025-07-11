@@ -1,4 +1,4 @@
-// index.js – גרסה מלאה שיודעת לעבד גם Price וגם Promo
+// index.js – גרסה מתוקנת ל-ESM עם import תקני של node-fetch
 
 import fs from 'fs';
 import zlib from 'zlib';
@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { Client } from 'pg';
 import { XMLParser } from 'fast-xml-parser';
 import dotenv from 'dotenv';
+import fetch from 'node-fetch';
 dotenv.config();
 
 const logins = JSON.parse(fs.readFileSync('./logins.json'));
@@ -15,7 +16,7 @@ const BASE_URL = 'https://url.publishedprices.co.il';
 const getLatestFiles = (fileList) => {
   const map = new Map();
   for (const file of fileList) {
-    const match = file.fname.match(/^(PriceFull|Price|PromoFull|Promo)(\d+)-(\d+)-\d{12}\.gz$/i);
+    const match = file.fname.match(/^(PriceFull|Price|PromoFull|Promo)(\d+)-(\d+)-(\d{12})\.gz$/i);
     if (!match) continue;
     const [_, type, chainId, storeId] = match;
     const key = `${type}_${storeId}`;
@@ -81,11 +82,11 @@ const getLatestFiles = (fileList) => {
       const latestFiles = getLatestFiles(fileList);
 
       for (const { fname, type, chainId, storeId } of latestFiles) {
-        try {
-          const fileUrl = `${BASE_URL}/file/d/${fname}`;
-          console.log(`⬇️ Downloading ${fname}`);
+        const fileUrl = `${BASE_URL}/file/d/${fname}`;
+        console.log(`⬇️ Downloading ${fname}`);
 
-          const fetchRes = await import('node-fetch').then(m => m.default)(fileUrl, {
+        try {
+          const fetchRes = await fetch(fileUrl, {
             headers: {
               Cookie: `cftpSID=${cookie.value}`,
             },
@@ -146,10 +147,6 @@ const getLatestFiles = (fileList) => {
               );
             }
 
-            // ניקוי זיכרון
-            items = null;
-            global.gc?.();
-
             console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
 
           } else if (type.toLowerCase().startsWith('promo')) {
@@ -160,20 +157,20 @@ const getLatestFiles = (fileList) => {
             for (const promo of promotions) {
               let products = promo?.PromotionItems?.Item || [];
               if (!Array.isArray(products)) products = [products];
-
               for (const product of products) {
-                await client.query(`UPDATE ${table} SET
-                  PromotionId = $1,
-                  PromotionDescription = $2,
-                  PromotionUpdateDate = $3,
-                  PromotionStartDate = $4,
-                  PromotionStartHour = $5,
-                  PromotionEndDate = $6,
-                  PromotionEndHour = $7,
-                  MinQty = $8,
-                  DiscountedPrice = $9,
-                  DiscountedPricePerMida = $10,
-                  MinNoOfItemOfered = $11
+                await client.query(`
+                  UPDATE ${table} SET
+                    PromotionId = $1,
+                    PromotionDescription = $2,
+                    PromotionUpdateDate = $3,
+                    PromotionStartDate = $4,
+                    PromotionStartHour = $5,
+                    PromotionEndDate = $6,
+                    PromotionEndHour = $7,
+                    MinQty = $8,
+                    DiscountedPrice = $9,
+                    DiscountedPricePerMida = $10,
+                    MinNoOfItemOfered = $11
                   WHERE product_id = $12
                 `, [
                   promo.PromotionId,
@@ -193,21 +190,17 @@ const getLatestFiles = (fileList) => {
               }
             }
 
-            // ניקוי זיכרון
-            promotions = null;
-            global.gc?.();
-
             console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
           }
 
-        } catch (err) {
-          console.error(`❌ Error in file ${fname}:`, err.message);
+        } catch (fileErr) {
+          console.error(`❌ Error in file ${fname}:`, fileErr.message);
         }
       }
 
       await context.close();
     } catch (err) {
-      console.error(`❌ Error with ${username}:`, err.message);
+      console.error(`❌ Error with ${username}:`, err);
     }
   }
 
