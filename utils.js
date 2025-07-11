@@ -1,4 +1,34 @@
-export async function parseAndInsertFile(buffer, fileMeta, pgClient, updateIndex = false) {
+import zlib from 'zlib';
+import { parseStringPromise } from 'xml2js';
+
+/**
+ * בוחר את הקובץ העדכני ביותר מכל סוג וסניף
+ */
+function getLatestFiles(fileList, username) {
+  const latestMap = new Map();
+
+  for (const file of fileList) {
+    const fname = file.fname || file[0];
+    const match = fname.match(/^(PriceFull|Price|PromoFull|Promo|Stores).*?(\d{9})-(\d{3})/i);
+    if (!match) continue;
+
+    const [_, type, chainId, storeId] = match;
+    const key = `${type}_${chainId}_${storeId}`;
+    const ftime = new Date(file.ftime || file[3]).getTime();
+
+    if (!latestMap.has(key) || ftime > latestMap.get(key).ftime) {
+      latestMap.set(key, { fname, ftime });
+    }
+  }
+
+  return Array.from(latestMap.values());
+}
+
+/**
+ * מפרק קובץ XML או GZ, מכניס לטבלת הסניף הרלוונטי,
+ * ואם הדגל true – גם לטבלה products_index
+ */
+async function parseAndInsertFile(buffer, fileMeta, pgClient, updateIndex = false) {
   const isGz = fileMeta.fname.endsWith('.gz');
   const rawXml = isGz ? zlib.gunzipSync(buffer).toString('utf8') : buffer.toString('utf8');
 
@@ -12,7 +42,6 @@ export async function parseAndInsertFile(buffer, fileMeta, pgClient, updateIndex
   const storeName = root?.StoreName?.[0] || '';
   const tableName = `products_${chainId}_${storeId}`;
 
-  // יצירת טבלה לכל סניף אם לא קיימת
   await pgClient.query(`
     CREATE TABLE IF NOT EXISTS ${tableName} (
       item_code TEXT,
@@ -53,9 +82,9 @@ export async function parseAndInsertFile(buffer, fileMeta, pgClient, updateIndex
        item_price, unit_price, price_update_date]
     );
 
-    // הכנסת לטבלה המרכזית
+    // הכנסת מוצר לטבלת index הכללית
     if (updateIndex && item_code) {
-      const category = null; // אפשר לחשב לפי item_name אם תרצה
+      const category = null; // אפשר להוסיף חישוב קטגוריה בהמשך
       await pgClient.query(
         `INSERT INTO products_index (
           item_code, item_name, manufacturer_name, category)
@@ -71,3 +100,5 @@ export async function parseAndInsertFile(buffer, fileMeta, pgClient, updateIndex
     }
   }
 }
+
+export { getLatestFiles, parseAndInsertFile };
