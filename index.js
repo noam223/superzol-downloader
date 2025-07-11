@@ -1,12 +1,12 @@
-// index.js – גרסה מתוקנת ל-ESM עם import תקני של node-fetch
+// index.js – גרסה מלאה עם הכנסה לטבלת products_index
 
 import fs from 'fs';
 import zlib from 'zlib';
 import { chromium } from 'playwright';
 import { Client } from 'pg';
 import { XMLParser } from 'fast-xml-parser';
+import fetch from 'node-fetch'; // ✅ תיקון השגיאה
 import dotenv from 'dotenv';
-import fetch from 'node-fetch';
 dotenv.config();
 
 const logins = JSON.parse(fs.readFileSync('./logins.json'));
@@ -16,7 +16,7 @@ const BASE_URL = 'https://url.publishedprices.co.il';
 const getLatestFiles = (fileList) => {
   const map = new Map();
   for (const file of fileList) {
-    const match = file.fname.match(/^(PriceFull|Price|PromoFull|Promo)(\d+)-(\d+)-(\d{12})\.gz$/i);
+    const match = file.fname.match(/^(PriceFull|Price|PromoFull|Promo)(\d+)-(\d+)-\d{12}\.gz$/i);
     if (!match) continue;
     const [_, type, chainId, storeId] = match;
     const key = `${type}_${storeId}`;
@@ -36,6 +36,17 @@ const getLatestFiles = (fileList) => {
   });
   await client.connect();
 
+  // ודא שהטבלה products_index קיימת
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS products_index (
+      item_code TEXT PRIMARY KEY,
+      item_name TEXT,
+      manufacturer_name TEXT,
+      category TEXT,
+      updated_at TIMESTAMP DEFAULT now()
+    );
+  `);
+
   for (const { username, password } of logins) {
     console.log(`\n🔐 Logging in as ${username}...`);
     const context = await browser.newContext();
@@ -54,11 +65,8 @@ const getLatestFiles = (fileList) => {
       const csrf = await page.getAttribute('meta[name="csrftoken"]', 'content');
 
       console.log(`📁 Fetching file list for ${username}...`);
-
       const res = await page.request.post(`${BASE_URL}/file/json/dir`, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
         form: {
           sEcho: '1',
           iColumns: '5',
@@ -87,11 +95,8 @@ const getLatestFiles = (fileList) => {
 
         try {
           const fetchRes = await fetch(fileUrl, {
-            headers: {
-              Cookie: `cftpSID=${cookie.value}`,
-            },
+            headers: { Cookie: `cftpSID=${cookie.value}` },
           });
-
           const buffer = await fetchRes.buffer();
           const xml = zlib.gunzipSync(buffer).toString('utf8');
           const json = parser.parse(xml);
@@ -145,11 +150,22 @@ const getLatestFiles = (fileList) => {
                 `INSERT INTO ${table} VALUES (${values.map((_, i) => `$${i + 1}`).join(',')})`,
                 values
               );
+
+              // הכנסת המוצר גם לטבלת products_index
+              await client.query(`
+                INSERT INTO products_index (item_code, item_name, manufacturer_name, category, updated_at)
+                VALUES ($1, $2, $3, NULL, now())
+                ON CONFLICT (item_code) DO UPDATE SET
+                  item_name = EXCLUDED.item_name,
+                  manufacturer_name = EXCLUDED.manufacturer_name,
+                  updated_at = now();
+              `, [item.ItemCode, item.ItemName, item.ManufacturerName]);
             }
 
             console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
+          }
 
-          } else if (type.toLowerCase().startsWith('promo')) {
+          else if (type.toLowerCase().startsWith('promo')) {
             let promotions = json?.Root?.Promotions?.Promotion || [];
             if (!Array.isArray(promotions)) promotions = [promotions];
             let updated = 0;
@@ -157,6 +173,7 @@ const getLatestFiles = (fileList) => {
             for (const promo of promotions) {
               let products = promo?.PromotionItems?.Item || [];
               if (!Array.isArray(products)) products = [products];
+
               for (const product of products) {
                 await client.query(`
                   UPDATE ${table} SET
@@ -192,15 +209,14 @@ const getLatestFiles = (fileList) => {
 
             console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
           }
-
-        } catch (fileErr) {
-          console.error(`❌ Error in file ${fname}:`, fileErr.message);
+        } catch (err) {
+          console.error(`❌ Error in file ${fname}: ${err.message}`);
         }
       }
 
       await context.close();
     } catch (err) {
-      console.error(`❌ Error with ${username}:`, err);
+      console.error(`❌ Error with ${username}:`, err.message);
     }
   }
 
