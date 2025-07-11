@@ -9,6 +9,8 @@ function isGzip(buffer) {
 }
 
 export async function getLatestFiles(fileList, username) {
+  if (!Array.isArray(fileList)) return [];
+
   const grouped = {};
 
   for (const file of fileList) {
