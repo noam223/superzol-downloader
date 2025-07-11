@@ -1,11 +1,10 @@
-// index.js – גרסה מלאה עם הכנסה לטבלת products_index
+// index.js – גרסה מלאה עם ניהול מבצעים עדכני
 
 import fs from 'fs';
 import zlib from 'zlib';
 import { chromium } from 'playwright';
 import { Client } from 'pg';
 import { XMLParser } from 'fast-xml-parser';
-import fetch from 'node-fetch'; // ✅ תיקון השגיאה
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -19,10 +18,10 @@ const getLatestFiles = (fileList) => {
     const match = file.fname.match(/^(PriceFull|Price|PromoFull|Promo)(\d+)-(\d+)-\d{12}\.gz$/i);
     if (!match) continue;
     const [_, type, chainId, storeId] = match;
-    const key = `${type}_${storeId}`;
+    const key = `${type.toLowerCase()}_${storeId}`;
     const existing = map.get(key);
     if (!existing || file.ftime > existing.ftime) {
-      map.set(key, { ...file, type, chainId, storeId });
+      map.set(key, { ...file, type: type.toLowerCase(), chainId, storeId });
     }
   }
   return Array.from(map.values());
@@ -35,17 +34,6 @@ const getLatestFiles = (fileList) => {
     ssl: { rejectUnauthorized: false },
   });
   await client.connect();
-
-  // ודא שהטבלה products_index קיימת
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS products_index (
-      item_code TEXT PRIMARY KEY,
-      item_name TEXT,
-      manufacturer_name TEXT,
-      category TEXT,
-      updated_at TIMESTAMP DEFAULT now()
-    );
-  `);
 
   for (const { username, password } of logins) {
     console.log(`\n🔐 Logging in as ${username}...`);
@@ -65,24 +53,16 @@ const getLatestFiles = (fileList) => {
       const csrf = await page.getAttribute('meta[name="csrftoken"]', 'content');
 
       console.log(`📁 Fetching file list for ${username}...`);
+
       const res = await page.request.post(`${BASE_URL}/file/json/dir`, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
         form: {
-          sEcho: '1',
-          iColumns: '5',
-          sColumns: ',,,,',
-          iDisplayStart: '0',
-          iDisplayLength: '100000',
-          mDataProp_0: 'fname',
-          mDataProp_1: 'typeLabel',
-          mDataProp_2: 'size',
-          mDataProp_3: 'ftime',
-          mDataProp_4: '',
-          sSearch: '',
-          bRegex: 'false',
-          iSortingCols: '0',
-          cd: '/',
-          csrftoken: csrf,
+          sEcho: '1', iColumns: '5', sColumns: ',,,,',
+          iDisplayStart: '0', iDisplayLength: '100000',
+          mDataProp_0: 'fname', mDataProp_1: 'typeLabel',
+          mDataProp_2: 'size', mDataProp_3: 'ftime',
+          mDataProp_4: '', sSearch: '', bRegex: 'false',
+          iSortingCols: '0', cd: '/', csrftoken: csrf,
         },
       });
 
@@ -94,15 +74,16 @@ const getLatestFiles = (fileList) => {
         console.log(`⬇️ Downloading ${fname}`);
 
         try {
-          const fetchRes = await fetch(fileUrl, {
+          const fetchRes = await import('node-fetch').then(mod => mod.default)(fileUrl, {
             headers: { Cookie: `cftpSID=${cookie.value}` },
           });
+
           const buffer = await fetchRes.buffer();
           const xml = zlib.gunzipSync(buffer).toString('utf8');
           const json = parser.parse(xml);
           const table = `products_${chainId}_${storeId}`;
 
-          if (type.toLowerCase().startsWith('price')) {
+          if (type.startsWith('price')) {
             let items = json?.Root?.Items?.Item || [];
             if (!Array.isArray(items)) items = [items];
             const storeName = json?.Root?.StoreName || 'Unknown';
@@ -150,46 +131,46 @@ const getLatestFiles = (fileList) => {
                 `INSERT INTO ${table} VALUES (${values.map((_, i) => `$${i + 1}`).join(',')})`,
                 values
               );
-
-              // הכנסת המוצר גם לטבלת products_index
-              await client.query(`
-                INSERT INTO products_index (item_code, item_name, manufacturer_name, category, updated_at)
-                VALUES ($1, $2, $3, NULL, now())
-                ON CONFLICT (item_code) DO UPDATE SET
-                  item_name = EXCLUDED.item_name,
-                  manufacturer_name = EXCLUDED.manufacturer_name,
-                  updated_at = now();
-              `, [item.ItemCode, item.ItemName, item.ManufacturerName]);
             }
-
             console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
-          }
 
-          else if (type.toLowerCase().startsWith('promo')) {
+          } else if (type.startsWith('promo')) {
+            // מחיקת מבצעים ישנים
+            await client.query(`UPDATE ${table} SET
+              PromotionId = NULL,
+              PromotionDescription = NULL,
+              PromotionUpdateDate = NULL,
+              PromotionStartDate = NULL,
+              PromotionStartHour = NULL,
+              PromotionEndDate = NULL,
+              PromotionEndHour = NULL,
+              MinQty = NULL,
+              DiscountedPrice = NULL,
+              DiscountedPricePerMida = NULL,
+              MinNoOfItemOfered = NULL
+              WHERE PromotionId IS NOT NULL`);
+            console.log(`🧹 Cleared old promotions from table ${table}`);
+
             let promotions = json?.Root?.Promotions?.Promotion || [];
             if (!Array.isArray(promotions)) promotions = [promotions];
             let updated = 0;
-
             for (const promo of promotions) {
               let products = promo?.PromotionItems?.Item || [];
               if (!Array.isArray(products)) products = [products];
-
               for (const product of products) {
-                await client.query(`
-                  UPDATE ${table} SET
-                    PromotionId = $1,
-                    PromotionDescription = $2,
-                    PromotionUpdateDate = $3,
-                    PromotionStartDate = $4,
-                    PromotionStartHour = $5,
-                    PromotionEndDate = $6,
-                    PromotionEndHour = $7,
-                    MinQty = $8,
-                    DiscountedPrice = $9,
-                    DiscountedPricePerMida = $10,
-                    MinNoOfItemOfered = $11
-                  WHERE product_id = $12
-                `, [
+                await client.query(`UPDATE ${table} SET
+                  PromotionId = $1,
+                  PromotionDescription = $2,
+                  PromotionUpdateDate = $3,
+                  PromotionStartDate = $4,
+                  PromotionStartHour = $5,
+                  PromotionEndDate = $6,
+                  PromotionEndHour = $7,
+                  MinQty = $8,
+                  DiscountedPrice = $9,
+                  DiscountedPricePerMida = $10,
+                  MinNoOfItemOfered = $11
+                  WHERE product_id = $12`, [
                   promo.PromotionId,
                   promo.PromotionDescription,
                   promo.PromotionUpdateDate,
@@ -206,11 +187,11 @@ const getLatestFiles = (fileList) => {
                 updated++;
               }
             }
-
-            console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
+            console.log(`🔥 Updated ${updated} promotion items in ${table}`);
           }
+
         } catch (err) {
-          console.error(`❌ Error in file ${fname}: ${err.message}`);
+          console.error(`❌ Error in file ${fname}:`, err.message);
         }
       }
 
