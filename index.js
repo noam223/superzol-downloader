@@ -47,7 +47,7 @@ for (const { username, password } of logins) {
     const csrf = await page.getAttribute('meta[name="csrftoken"]', 'content');
 
     console.log(`📁 Fetching file list for ${username}...`);
-    const res = await page.request.post(`${BASE_URL}/file/json/dir`, {
+    const fileListRes = await page.request.post(`${BASE_URL}/file/json/dir`, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
       },
@@ -70,8 +70,15 @@ for (const { username, password } of logins) {
       }
     });
 
-    const fileList = (await res.json()).aaData || [];
-    const latestFiles = getLatestFiles(fileList, username);
+    const fileListJson = await fileListRes.json();
+    const fileList = Array.isArray(fileListJson?.aaData) ? fileListJson.aaData : [];
+
+    const latestFiles = await getLatestFiles(fileList, username);
+    if (!Array.isArray(latestFiles)) {
+      console.warn(`⚠️ No valid files found for ${username}`);
+      await context.close();
+      continue;
+    }
 
     for (const fileMeta of latestFiles) {
       try {
