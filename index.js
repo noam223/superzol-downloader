@@ -1,4 +1,5 @@
 // index.js – גרסה מלאה עם ניהול מבצעים ועדכון SSL
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // ⛔ ביטול בדיקת SSL עבור fetch
 
 import fs from 'fs';
 import zlib from 'zlib';
@@ -29,6 +30,7 @@ const getLatestFiles = (fileList) => {
 
 (async () => {
   const browser = await chromium.launch({
+    headless: true,
     ignoreHTTPSErrors: true  // ✅ עוקף בעיות SSL באתר
   });
 
