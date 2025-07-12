@@ -1,4 +1,4 @@
-// index.js – גרסה מלאה עם ניהול מבצעים עדכני
+// index.js – גרסה מלאה עם ניהול מבצעים ועדכון SSL
 
 import fs from 'fs';
 import zlib from 'zlib';
@@ -28,7 +28,10 @@ const getLatestFiles = (fileList) => {
 };
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({
+    ignoreHTTPSErrors: true  // ✅ עוקף בעיות SSL באתר
+  });
+
   const client = new Client({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false },
@@ -135,7 +138,6 @@ const getLatestFiles = (fileList) => {
             console.log(`✅ Parsed file ${fname} for chain ${chainId}, store ${storeId}`);
 
           } else if (type.startsWith('promo')) {
-            // מחיקת מבצעים ישנים
             await client.query(`UPDATE ${table} SET
               PromotionId = NULL,
               PromotionDescription = NULL,
