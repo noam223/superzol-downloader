@@ -1,12 +1,16 @@
-process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0'; // עקיפת SSL שפג
+process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
 
-const fs = require('fs');
-const path = require('path');
-const fetch = require('node-fetch');
-const { CookieJar } = require('tough-cookie');
-const fetchCookie = require('fetch-cookie');
-const https = require('https');
-const logins = require('./logins.json');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fetch from 'node-fetch';
+import { CookieJar } from 'tough-cookie';
+import fetchCookie from 'fetch-cookie';
+import https from 'https';
+import logins from './logins.json' assert { type: "json" };
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const agent = new https.Agent({ rejectUnauthorized: false });
 
@@ -16,7 +20,6 @@ const loginAndDownload = async (username, password) => {
 
   console.log(`🔐 Logging in as ${username}...`);
 
-  // התחברות
   const loginRes = await fetchWithCookies('https://url.publishedprices.co.il/login', {
     method: 'POST',
     agent,
@@ -35,7 +38,6 @@ const loginAndDownload = async (username, password) => {
     return;
   }
 
-  // בקשת רשימת קבצים
   const csrfRes = await fetchWithCookies('https://url.publishedprices.co.il/', { agent });
   const csrfHtml = await csrfRes.text();
   const csrfMatch = csrfHtml.match(/name="csrftoken" content="(.+?)"/);
@@ -110,14 +112,8 @@ const loginAndDownload = async (username, password) => {
   }
 };
 
-(async () => {
-  for (const { username, password } of logins) {
-    try {
-      await loginAndDownload(username, password);
-    } catch (err) {
-      console.error(`❌ Error with ${username}:`, err.message);
-    }
-  }
-
-  console.log('🎉 All chains processed.');
-})();
+for (const { username, password } of logins) {
+  loginAndDownload(username, password).catch(err => {
+    console.error(`❌ Error with ${username}:`, err.message);
+  });
+}
