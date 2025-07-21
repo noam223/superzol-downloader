@@ -1,28 +1,36 @@
+// מתיר התחברות לאתרים עם תעודת SSL שפג תוקף
+process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
+
 const fs = require('fs');
 const path = require('path');
 const fetch = require('node-fetch');
-const https = require('https'); // הוספנו
+const https = require('https');
 const { chromium } = require('playwright');
 const logins = require('./logins.json');
 
-// סוכן שמתעלם משגיאות SSL
+// סוכן שמאפשר חיבור HTTPS ללא בדיקת תעודה
 const insecureAgent = new https.Agent({
   rejectUnauthorized: false
 });
 
 (async () => {
-  // מאפשר גישה גם עם תעודת SSL לא תקינה
   const browser = await chromium.launch({
     headless: true,
-    args: ['--ignore-certificate-errors']
+    args: [
+      '--ignore-certificate-errors',
+      '--allow-insecure-localhost',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+    ]
   });
 
   for (const { username, password } of logins) {
     console.log(`🔐 Logging in as ${username}...`);
 
     const context = await browser.newContext({
-      ignoreHTTPSErrors: true // חשוב גם כאן
+      ignoreHTTPSErrors: true
     });
+
     const page = await context.newPage();
 
     try {
@@ -95,7 +103,7 @@ const insecureAgent = new https.Agent({
           headers: {
             Cookie: `cftpSID=${cookie.value}`,
           },
-          agent: insecureAgent // זה מאפשר להוריד גם עם SSL פג
+          agent: insecureAgent
         });
 
         const buffer = await downloadRes.buffer();
