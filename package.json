@@ -5,12 +5,12 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "import": "node import_to_firestore.js",
-    "postinstall": "npx playwright install --with-deps"
+    "import": "node import_to_firestore.js"
   },
   "dependencies": {
-    "playwright": "^1.44.0",
     "node-fetch": "^2.6.7",
+    "fetch-cookie": "^0.10.1",
+    "tough-cookie": "^4.1.3",
     "xml2js": "^0.6.2",
     "pg": "^8.11.1",
     "fast-xml-parser": "^4.3.5",
