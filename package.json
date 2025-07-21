@@ -1,22 +1,11 @@
 {
-  "name": "superzol-downloader",
-  "version": "1.0.0",
   "type": "module",
-  "main": "download.js",
   "scripts": {
-    "start": "node download.js",
-    "import": "node import_to_firestore.js",
-    "postinstall": "npx playwright install --with-deps"
+    "start": "node download.js"
   },
   "dependencies": {
-    "playwright": "^1.44.0",
     "node-fetch": "^2.6.7",
     "fetch-cookie": "^0.10.1",
-    "tough-cookie": "^4.1.3",
-    "xml2js": "^0.6.2",
-    "pg": "^8.11.1",
-    "fast-xml-parser": "^4.3.5",
-    "dotenv": "^16.0.3",
-    "firebase-admin": "^11.10.1"
+    "tough-cookie": "^4.1.3"
   }
 }
