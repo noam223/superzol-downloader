@@ -1,17 +1,28 @@
 const fs = require('fs');
 const path = require('path');
 const fetch = require('node-fetch');
+const https = require('https'); // הוספנו
 const { chromium } = require('playwright');
 const logins = require('./logins.json');
 
+// סוכן שמתעלם משגיאות SSL
+const insecureAgent = new https.Agent({
+  rejectUnauthorized: false
+});
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
+  // מאפשר גישה גם עם תעודת SSL לא תקינה
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--ignore-certificate-errors']
+  });
 
   for (const { username, password } of logins) {
     console.log(`🔐 Logging in as ${username}...`);
 
-    const context = await browser.newContext();
+    const context = await browser.newContext({
+      ignoreHTTPSErrors: true // חשוב גם כאן
+    });
     const page = await context.newPage();
 
     try {
@@ -84,6 +95,7 @@ const logins = require('./logins.json');
           headers: {
             Cookie: `cftpSID=${cookie.value}`,
           },
+          agent: insecureAgent // זה מאפשר להוריד גם עם SSL פג
         });
 
         const buffer = await downloadRes.buffer();
