@@ -5,9 +5,11 @@
   "main": "download.js",
   "scripts": {
     "start": "node download.js",
-    "import": "node import_to_firestore.js"
+    "import": "node import_to_firestore.js",
+    "postinstall": "npx playwright install --with-deps"
   },
   "dependencies": {
+    "playwright": "^1.44.0",
     "node-fetch": "^2.6.7",
     "fetch-cookie": "^0.10.1",
     "tough-cookie": "^4.1.3",
