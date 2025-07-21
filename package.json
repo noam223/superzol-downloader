@@ -1,5 +1,8 @@
 {
+  "name": "superzol-downloader",
+  "version": "1.0.0",
   "type": "module",
+  "main": "download.js",
   "scripts": {
     "start": "node download.js"
   },
