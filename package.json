@@ -2,7 +2,7 @@
   "name": "superzol-downloader",
   "version": "1.0.0",
   "type": "module",
-  "main": "index.js",
+  "main": "download.js",
   "scripts": {
     "start": "node download.js",
     "import": "node import_to_firestore.js"
