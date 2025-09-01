@@ -186,7 +186,7 @@ async function updateGlobalPromotionStatus() {
 
                 console.log(`⬇️ ${username}: מוריד ${latestFiles.length} קבצים...`);
 
-                const userDir = path.join(__dirname, 'downloads', username);
+                const userDir = path.join(process.cwd(), 'downloads', username);
                 fs.rmSync(userDir, { recursive: true, force: true });
                 fs.mkdirSync(userDir, { recursive: true });
 
