@@ -5,14 +5,11 @@ import zlib from 'zlib';
 import fs from 'fs';
 import path from 'path';
 import fetch from 'node-fetch';
-import dotenv from 'dotenv';
 import { chromium } from 'playwright';
 import https from 'https';
 
-dotenv.config();
-
-// התחברות ל-Algolia
-const algoliaClient = algoliasearch(process.env.ALGOLIA_APP_ID, process.env.ALGOLIA_ADMIN_KEY);
+// התחברות ל-Algolia עם המפתחות שהוזנו ישירות
+const algoliaClient = algoliasearch('V4XY7LV3X2', 'e76bf51e696af3840a6d78cf7ec33292');
 
 // נתיב לקובץ עם פרטי הכניסה
 const logins = JSON.parse(fs.readFileSync('./logins.json', 'utf-8'));
