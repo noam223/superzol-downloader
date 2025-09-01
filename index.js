@@ -1,29 +1,25 @@
 // index.js - סקריפט לסנכרון נתוני מחירים ומבצעים ישירות ל-Algolia
 //
 // סקריפט זה מבצע את התהליך המלא:
-// 1. הורדת הקבצים העדכניים ביותר מהאתר, כולל קבצי חנויות.
+// 1. הורדת הקבצים העדכניים ביותר מהאתר, כולל קבצי חנויות, באמצעות Playwright.
 // 2. ניתוח ועיבוד נתוני XML לפורמט JSON.
 // 3. העלאת הנתונים לאינדקסים המתאימים באלגוליה.
-// 4. עדכון שמת החנויות ישירות מהקבצים שירדו.
+// 4. עדכון שמות החנויות ישירות מהקבצים שירדו.
 // 5. עדכון סטטוס המבצעים באינדקס הגלובלי.
 //
 // **הערה:** יש לוודא שקיימים הקבצים logins.json ו-.env עם פרטי ההתחברות.
 //
 // **תלויות:**
 // npm install algoliasearch node-fetch fast-xml-parser dotenv tough-cookie fetch-cookie
-
-// ⛔ עוקף בעיות SSL: שורה זו מבטלת את אימות ה-SSL עבור בקשות `fetch`.
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+// **הערה:** עכשיו עליך להתקין גם את playwright:
+// npm install playwright
 
 import algoliasearch from 'algoliasearch';
 import { XMLParser } from 'fast-xml-parser';
 import zlib from 'zlib';
 import fs from 'fs';
 import dotenv from 'dotenv';
-import fetch from 'node-fetch';
-import { CookieJar } from 'tough-cookie';
-import fetchCookie from 'fetch-cookie';
-import https from 'https';
+import { chromium } from 'playwright';
 dotenv.config();
 
 // התחברות ל-Algolia
@@ -33,7 +29,6 @@ const algoliaClient = algoliasearch(process.env.ALGOLIA_APP_ID, process.env.ALGO
 const logins = JSON.parse(fs.readFileSync('./logins.json', 'utf-8'));
 const parser = new XMLParser({ ignoreAttributes: false });
 const BASE_URL = 'https://url.publishedprices.co.il';
-const agent = new https.Agent({ rejectUnauthorized: false });
 
 /**
  * פונקציה שמאתרת את הקובץ העדכני ביותר מכל סוג (מחיר/מבצע/חנויות) עבור כל חנות/רשת.
@@ -51,7 +46,7 @@ const getLatestFiles = (fileList) => {
         const [_, type, chainId, storeId] = match;
         const key = `${type.toLowerCase()}_${storeId || chainId}`; // Store files use chainId as key
         const existing = map.get(key);
-        if (!existing || file.ftime > existing.ftime) {
+        if (existing || file.ftime > existing?.ftime) {
             map.set(key, { ...file, type: type.toLowerCase(), chainId, storeId });
         }
     }
@@ -166,63 +161,53 @@ async function updateGlobalPromotionStatus() {
     const globalMap = new Map();
     const storeInfoMap = new Map();
 
+    // 🚀 שימוש ב-Playwright להתחברות והורדת קבצים
+    const browser = await chromium.launch({ headless: true });
+
     for (const { username, password } of logins) {
-        const jar = new CookieJar();
-        const fetchWithCookies = fetchCookie(fetch, jar);
-        
         console.log(`\n🔐 מתחבר כמשתמש ${username}...`);
-
+        
         try {
-            // התחברות
-            const loginRes = await fetchWithCookies(`${BASE_URL}/login`, {
-                method: 'POST',
-                agent,
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams({ username, password: password || '' }),
-            });
+            const context = await browser.newContext();
+            const page = await context.newPage();
 
-            const loginText = await loginRes.text();
-            if (!loginText.includes('window.location')) {
-                throw new Error('Login failed');
-            }
-
-            // קבלת טוקן CSRF
-            const csrfRes = await fetchWithCookies(`${BASE_URL}/`, { agent });
-            const csrfHtml = await csrfRes.text();
-            const csrfMatch = csrfHtml.match(/name="csrftoken" content="(.+?)"/);
-            const csrfToken = csrfMatch ? csrfMatch[1] : null;
-
-            if (!csrfToken) {
-                throw new Error('CSRF token not found');
-            }
+            await page.goto(`${BASE_URL}/login`);
+            await page.fill('input[name="username"]', username);
+            await page.fill('input[name="password"]', password || '');
+            
+            await Promise.all([
+                page.waitForNavigation(),
+                page.click('button[type="submit"]'),
+            ]);
 
             console.log(`📁 מוריד רשימת קבצים עבור ${username}...`);
-
-            // הורדת רשימת הקבצים
-            const res = await fetchWithCookies(`${BASE_URL}/file/json/dir`, {
-                method: 'POST',
-                agent,
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-                body: new URLSearchParams({
+            
+            const fileRes = await page.request.post(`${BASE_URL}/file/json/dir`, {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+                },
+                form: {
                     sEcho: '1', iColumns: '5', sColumns: ',,,,',
                     iDisplayStart: '0', iDisplayLength: '100000',
                     mDataProp_0: 'fname', mDataProp_1: 'typeLabel',
                     mDataProp_2: 'size', mDataProp_3: 'ftime',
                     mDataProp_4: '', sSearch: '', bRegex: 'false',
-                    iSortingCols: '0', cd: '/', csrftoken: csrfToken,
-                }),
+                    iSortingCols: '0', cd: '/', 
+                    csrftoken: await page.getAttribute('meta[name="csrftoken"]', 'content'),
+                },
             });
 
-            const fileList = (await res.json()).aaData || [];
+            const fileList = (await fileRes.json()).aaData || [];
             const latestFiles = getLatestFiles(fileList);
+            await context.close();
 
             for (const { fname, type, chainId, storeId } of latestFiles) {
                 const fileUrl = `${BASE_URL}/file/d/${fname}`;
                 console.log(`⬇️ מוריד קובץ ${fname}`);
 
                 try {
-                    const fetchRes = await fetchWithCookies(fileUrl, { agent });
-
+                    const fetchRes = await fetch(fileUrl);
                     if (!fetchRes.ok) {
                         throw new Error(`HTTP Error: ${fetchRes.status} ${fetchRes.statusText}`);
                     }
