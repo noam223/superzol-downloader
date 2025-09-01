@@ -1,47 +1,34 @@
-// index.js - סקריפט לסנכרון נתוני מחירים ומבצעים ישירות ל-Algolia
-//
-// סקריפט זה מבצע את התהליך המלא:
-// 1. הורדת הקבצים העדכניים ביותר מהאתר, כולל קבצי חנויות, באמצעות Playwright.
-// 2. ניתוח ועיבוד נתוני XML לפורמט JSON.
-// 3. העלאת הנתונים לאינדקסים המתאימים באלגוליה.
-// 4. עדכון שמות החנויות ישירות מהקבצים שירדו.
-// 5. עדכון סטטוס המבצעים באינדקס הגלובלי.
-//
-// **הערה:** יש לוודא שקיימים הקבצים logins.json ו-.env עם פרטי ההתחברות.
-//
-// **תלויות:**
-// npm install algoliasearch fast-xml-parser dotenv playwright
-// **הערה:** יש להוסיף לקובץ package.json את השורה: "postinstall": "npx playwright install --with-deps"
-
+// ייבוא מודולים נחוצים
 import algoliasearch from 'algoliasearch';
 import { XMLParser } from 'fast-xml-parser';
 import zlib from 'zlib';
 import fs from 'fs';
+import path from 'path';
+import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 import { chromium } from 'playwright';
+
 dotenv.config();
 
 // התחברות ל-Algolia
 const algoliaClient = algoliasearch(process.env.ALGOLIA_APP_ID, process.env.ALGOLIA_ADMIN_KEY);
 
-// קריאת פרטי התחברות מקובץ logins.json
+// נתיב לקובץ עם פרטי הכניסה
 const logins = JSON.parse(fs.readFileSync('./logins.json', 'utf-8'));
 const parser = new XMLParser({ ignoreAttributes: false });
 const BASE_URL = 'https://url.publishedprices.co.il';
 
 /**
- * פונקציה שמאתרת את הקובץ העדכני ביותר מכל סוג (מחיר/מבצע/חנויות) עבור כל חנות/רשת.
- *
- * @param {array} fileList - רשימת הקבצים שהתקבלה מהאתר.
- * @returns {array} - מערך של אובייקטי הקבצים העדכניים ביותר.
- */
+ * פונקציה שמאתרת את הקובץ העדכני ביותר מכל סוג (מחיר/מבצע/חנויות) עבור כל חנות/רשת.
+ *
+ * @param {array} fileList - רשימת הקבצים שהתקבלה מהאתר.
+ * @returns {array} - מערך של אובייקטי הקבצים העדכניים ביותר.
+ */
 const getLatestFiles = (fileList) => {
     const map = new Map();
     for (const file of fileList) {
-        // Regex מעודכן כדי לכלול קבצי Stores
         const match = file.fname.match(/^(PriceFull|Price|PromoFull|Promo|Stores)(\d+)(?:-(\d+))?-\d{12}\.gz$/i);
         if (!match) continue;
-
         const [_, type, chainId, storeId] = match;
         const key = `${type.toLowerCase()}_${storeId || chainId}`; // Store files use chainId as key
         const existing = map.get(key);
@@ -53,11 +40,11 @@ const getLatestFiles = (fileList) => {
 };
 
 /**
- * מנתחת קובץ XML של נתוני חנויות ומחזירה מערך של רשומות חנויות.
- *
- * @param {string} xmlContent - תוכן קובץ ה-XML כסטרינג.
- * @returns {array} - מערך של רשומות חנויות.
- */
+ * מנתחת קובץ XML של נתוני חנויות ומחזירה מערך של רשומות חנויות.
+ *
+ * @param {string} xmlContent - תוכן קובץ ה-XML כסטרינג.
+ * @returns {array} - מערך של רשומות חנויות.
+ */
 function parseXmlStoreFile(xmlContent) {
     const parser = new XMLParser({ ignoreAttributes: false });
     const data = parser.parse(xmlContent);
@@ -82,11 +69,11 @@ function parseXmlStoreFile(xmlContent) {
 }
 
 /**
- * בודק אם לפריט יש מבצע פעיל.
- *
- * @param {object} hit - אובייקט של מוצר מ-Algolia.
- * @returns {boolean} - האם יש מבצע פעיל.
- */
+ * בודק אם לפריט יש מבצע פעיל.
+ *
+ * @param {object} hit - אובייקט של מוצר מ-Algolia.
+ * @returns {boolean} - האם יש מבצע פעיל.
+ */
 function isPromotion(hit) {
     const promotionId = hit.PromotionId;
     const discounted = parseFloat(hit.DiscountedPrice || 0);
@@ -98,22 +85,15 @@ function isPromotion(hit) {
 }
 
 /**
- * סורק את האינדקסים של החנויות ומעדכן את סטטוס המבצעים באינדקס הראשי.
- */
+ * סורק את האינדקסים של החנויות ומעדכן את סטטוס המבצעים באינדקס הראשי.
+ */
 async function updateGlobalPromotionStatus() {
     const statusMap = new Map();
-    // רשימת אינדקסים קבועה ללא קודים
     const indexNames = [
-        'products_7291059100008', // פוליצר
-        'products_7290803800003', // יוחננוף
-        'products_7290103152017', // אושר עד
-        'products_7290873255550', // טיב טעם
-        'products_7290639000004', // סטופ מרקט
-        'products_7290058140886', // רמי לוי
-        'products_7290526500006', // שופרסל
-        'products_7290055700008', // סלאח דבאח
-        'products_7290839800000', // פרשמרקט
-        'products_7290555555555', // קשת טעמים
+        'products_7291059100008', 'products_7290803800003', 'products_7290103152017', 
+        'products_7290873255550', 'products_7290639000004', 'products_7290058140886', 
+        'products_7290526500006', 'products_7290055700008', 'products_7290839800000', 
+        'products_7290555555555', 
     ];
 
     console.log('\n🔄 מתחיל סנכרון סטטוס מבצעים לאינדקס הגלובלי...');
@@ -159,124 +139,141 @@ async function updateGlobalPromotionStatus() {
     const globalMap = new Map();
     const storeInfoMap = new Map();
     
-    // 🚀 שימוש ב-Playwright להתחברות והורדת קבצים
-    const browser = await chromium.launch({
-        headless: true,
-        ignoreHTTPSErrors: true,
-    });
+    const browser = await chromium.launch({ headless: true });
 
-    for (const { username, password } of logins) {
-        console.log(`\n🔐 מתחבר כמשתמש ${username}...`);
-        
-        try {
-            const context = await browser.newContext({
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-            });
+    try {
+        // לולאה שעוברת על כל המשתמשים שהוגדרו בקובץ logins.json
+        for (const { username, password } of logins) {
+            console.log(`\n🔐 מתחבר כמשתמש ${username}...`);
+            
+            const context = await browser.newContext();
             const page = await context.newPage();
 
-            const loginResponse = await page.goto(`${BASE_URL}/login`);
-            
-            if (loginResponse.status() !== 200) {
-                throw new Error(`HTTP Error: ${loginResponse.status()} ${loginResponse.statusText()}`);
-            }
+            try {
+                // ניווט והתחברות באמצעות Playwright
+                await page.goto('https://url.publishedprices.co.il/login');
+                await page.fill('input[name="username"]', username);
+                await page.fill('input[name="password"]', password || '');
 
-            await page.fill('input[name="username"]', username);
-            await page.fill('input[name="password"]', password || '');
-            
-            const [navigationResponse] = await Promise.all([
-                page.waitForNavigation(),
-                page.click('button[type="submit"]'),
-            ]);
+                await Promise.all([
+                    page.waitForNavigation(),
+                    page.click('button[type="submit"]'),
+                ]);
+                
+                // חילוץ קוקיז וטוקן CSRF מהדף
+                const cookie = (await context.cookies()).find(c => c.name === 'cftpSID');
+                const csrf = await page.getAttribute('meta[name="csrftoken"]', 'content');
+                
+                console.log(`📁 מביא רשימת קבצים עבור ${username}...`);
 
-            // בודק האם ההתחברות הצליחה על ידי ניתוב לדף הבית
-            const finalUrl = page.url();
-            if (!finalUrl.includes('//url.publishedprices.co.il/')) {
-                throw new Error('Login failed');
-            }
-            
-            console.log(`📁 מוריד רשימת קבצים עבור ${username}...`);
-            const fileListResponse = await page.request.post(`${BASE_URL}/file/json/dir`, {
-                form: {
-                    sEcho: '1', iColumns: '5', sColumns: ',,,,',
-                    iDisplayStart: '0', iDisplayLength: '100000',
-                    mDataProp_0: 'fname', mDataProp_1: 'typeLabel',
-                    mDataProp_2: 'size', mDataProp_3: 'ftime',
-                    mDataProp_4: '', sSearch: '', bRegex: 'false',
-                    iSortingCols: '0', cd: '/', 
-                    csrftoken: await page.getAttribute('meta[name="csrftoken"]', 'content'),
-                },
-            });
+                const fileListRes = await page.request.post(`${BASE_URL}/file/json/dir`, {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    },
+                    form: {
+                        sEcho: '1', iColumns: '5', sColumns: ',,,,',
+                        iDisplayStart: '0', iDisplayLength: '100000',
+                        mDataProp_0: 'fname', mDataProp_1: 'typeLabel',
+                        mDataProp_2: 'size', mDataProp_3: 'ftime',
+                        mDataProp_4: '', sSearch: '', bRegex: 'false',
+                        iSortingCols: '0', cd: '/', csrftoken: csrf,
+                    },
+                });
 
-            const fileList = (await fileListResponse.json()).aaData || [];
-            const latestFiles = getLatestFiles(fileList);
-            
-            for (const { fname, type, chainId, storeId } of latestFiles) {
-                const fileUrl = `${BASE_URL}/file/d/${fname}`;
-                console.log(`⬇️ מוריד קובץ ${fname}`);
+                const fileList = (await fileListRes.json()).aaData || [];
+                const latestFiles = getLatestFiles(fileList);
 
-                try {
-                    // שימוש ב-page.request.get כדי לשמור על סשן ההתחברות
-                    const fetchRes = await page.request.get(fileUrl, {
-                        ignoreHTTPSErrors: true
+                console.log(`⬇️ ${username}: מוריד ${latestFiles.length} קבצים...`);
+
+                const userDir = path.join(__dirname, 'downloads', username);
+                fs.rmSync(userDir, { recursive: true, force: true });
+                fs.mkdirSync(userDir, { recursive: true });
+
+                for (const file of latestFiles) {
+                    const fileUrl = `https://url.publishedprices.co.il/file/d/${file.fname}`;
+                    const filePath = path.join(userDir, file.fname);
+                    
+                    const downloadRes = await fetch(fileUrl, {
+                        headers: {
+                            Cookie: `cftpSID=${cookie.value}`,
+                        },
                     });
                     
-                    const buffer = await fetchRes.body();
-                    const xml = zlib.gunzipSync(buffer).toString('utf8');
+                    const buffer = await downloadRes.buffer();
+                    fs.writeFileSync(filePath, buffer);
+                    console.log(`✅ ${username}: הוריד ${file.fname}`);
+                }
+                await context.close();
+            } catch (err) {
+                console.error(`❌ שגיאה עם המשתמש ${username}:`, err.message);
+                await context.close();
+                continue; // עובר למשתמש הבא במקרה של שגיאה
+            }
+            
+            // עכשיו נעבד את הקבצים שהורדו
+            const downloadedFiles = fs.readdirSync(userDir);
+            for (const fname of downloadedFiles) {
+                const fullPath = path.join(userDir, fname);
+                const buffer = fs.readFileSync(fullPath);
+                const xml = zlib.gunzipSync(buffer).toString('utf8');
+                
+                const match = fname.match(/^(PriceFull|Price|PromoFull|Promo|Stores)(\d+)(?:-(\d+))?-\d{12}\.gz$/i);
+                if (!match) continue;
 
-                    if (type.startsWith('price')) {
-                        const json = parser.parse(xml);
-                        const index = algoliaClient.initIndex(`products_${chainId}_${storeId}`);
-                        let items = json?.Root?.Items?.Item || [];
-                        if (!Array.isArray(items)) items = [items];
-                        
-                        const itemsToUpload = items.map(p => {
-                            const formatted = {
-                                objectID: `${p.ItemCode}-${storeId}`,
-                                ...p,
-                            };
-                            if (!globalMap.has(p.ItemCode)) {
-                                const { StoreId, ChainId, ItemPrice, UnitOfMeasurePrice, PriceUpdateDate,
-                                    PromotionId, PromotionDescription, PromotionUpdateDate,
-                                    PromotionStartDate, PromotionStartHour, PromotionEndDate,
-                                    PromotionEndHour, MinQty, DiscountedPrice, DiscountedPricePerMida,
-                                    MinNoOfItemOfered, StoreName, ...cleaned
-                                } = formatted;
-                                globalMap.set(p.ItemCode, {
-                                    objectID: p.ItemCode,
-                                    ...cleaned,
-                                });
-                            }
-                            return formatted;
-                        });
+                const [_, type, chainId, storeId] = match;
 
-                        console.log(`🚀 מעלה ${itemsToUpload.length} מוצרים לאינדקס ${index.indexName}`);
-                        await index.saveObjects(itemsToUpload);
+                if (type.toLowerCase().startsWith('price')) {
+                    const json = parser.parse(xml);
+                    const index = algoliaClient.initIndex(`products_${chainId}_${storeId}`);
+                    let items = json?.Root?.Items?.Item || [];
+                    if (!Array.isArray(items)) items = [items];
+                    
+                    const itemsToUpload = items.map(p => {
+                        const formatted = {
+                            objectID: `${p.ItemCode}-${storeId}`,
+                            ...p,
+                        };
+                        if (!globalMap.has(p.ItemCode)) {
+                            const { StoreId, ChainId, ItemPrice, UnitOfMeasurePrice, PriceUpdateDate,
+                                PromotionId, PromotionDescription, PromotionUpdateDate,
+                                PromotionStartDate, PromotionStartHour, PromotionEndDate,
+                                PromotionEndHour, MinQty, DiscountedPrice, DiscountedPricePerMida,
+                                MinNoOfItemOfered, StoreName, ...cleaned
+                            } = formatted;
+                            globalMap.set(p.ItemCode, {
+                                objectID: p.ItemCode,
+                                ...cleaned,
+                            });
+                        }
+                        return formatted;
+                    });
 
-                    } else if (type.startsWith('promo')) {
-                        const json = parser.parse(xml);
-                        const index = algoliaClient.initIndex(`products_${chainId}_${storeId}`);
-                        let promotions = json?.Root?.Promotions?.Promotion || [];
-                        if (!Array.isArray(promotions)) promotions = [promotions];
-                        
-                        const itemsToUpload = [];
-                        for (const promo of promotions) {
-                            let products = promo?.PromotionItems?.Item || [];
-                            if (!Array.isArray(products)) products = [products];
-                            for (const product of products) {
-                                itemsToUpload.push({
-                                    objectID: `${product.ItemCode}-${storeId}`,
-                                    PromotionId: promo.PromotionId,
-                                    PromotionDescription: promo.PromotionDescription,
-                                    PromotionUpdateDate: promo.PromotionUpdateDate,
-                                    PromotionStartDate: promo.PromotionStartDate,
-                                    PromotionStartHour: promo.PromotionStartHour,
-                                    PromotionEndDate: promo.PromotionEndDate,
-                                    PromotionEndHour: promo.PromotionEndHour,
-                                    MinQty: promo.MinQty,
-                                    DiscountedPrice: promo.DiscountedPrice,
-                                    DiscountedPricePerMida: promo.DiscountedPricePerMida,
-                                    MinNoOfItemOfered: promo.MinNoOfItemOfered,
-                                });
+                    console.log(`🚀 מעלה ${itemsToUpload.length} מוצרים לאינדקס ${index.indexName}`);
+                    await index.saveObjects(itemsToUpload);
+
+                } else if (type.toLowerCase().startsWith('promo')) {
+                    const json = parser.parse(xml);
+                    const index = algoliaClient.initIndex(`products_${chainId}_${storeId}`);
+                    let promotions = json?.Root?.Promotions?.Promotion || [];
+                    if (!Array.isArray(promotions)) promotions = [promotions];
+                    
+                    const itemsToUpload = [];
+                    for (const promo of promotions) {
+                        let products = promo?.PromotionItems?.Item || [];
+                        if (!Array.isArray(products)) products = [products];
+                        for (const product of products) {
+                            itemsToUpload.push({
+                                objectID: `${product.ItemCode}-${storeId}`,
+                                PromotionId: promo.PromotionId,
+                                PromotionDescription: promo.PromotionDescription,
+                                PromotionUpdateDate: promo.PromotionUpdateDate,
+                                PromotionStartDate: promo.PromotionStartDate,
+                                PromotionEndHour: promo.PromotionEndHour,
+                                MinQty: promo.MinQty,
+                                DiscountedPrice: promo.DiscountedPrice,
+                                DiscountedPricePerMida: promo.DiscountedPricePerMida,
+                                MinNoOfItemOfered: promo.MinNoOfItemOfered,
+                            });
                             }
                         }
 
@@ -284,30 +281,25 @@ async function updateGlobalPromotionStatus() {
                             console.log(`🔥 מעדכן ${itemsToUpload.length} פריטי מבצעים באינדקס ${index.indexName}`);
                             await index.partialUpdateObjects(itemsToUpload, { createIfNotExists: true });
                         }
-                    } else if (type.startsWith('stores')) {
-                        const storeRecords = parseXmlStoreFile(xml);
-                        storeInfoMap.set(chainId, storeRecords);
-                        console.log(`📦 נטענו ${storeRecords.length} סניפים עבור רשת ${chainId}`);
-                    }
-
-                } catch (err) {
-                    console.error(`❌ שגיאה בהורדת קובץ ${fname}:`, err.message);
+                } else if (type.toLowerCase().startsWith('stores')) {
+                    const storeRecords = parseXmlStoreFile(xml);
+                    storeInfoMap.set(chainId, storeRecords);
+                    console.log(`📦 נטענו ${storeRecords.length} סניפים עבור רשת ${chainId}`);
                 }
             }
-        } catch (err) {
-            console.error(`❌ שגיאה עם המשתמש ${username}:`, err.message);
-        }
-    }
-    await browser.close();
 
-    // העלאת הנתונים לאינדקס הגלובלי בסיום
+        }
+    } finally {
+        await browser.close();
+    }
+
+    // לאחר עיבוד כל הקבצים, מעלים את הנתונים לאינדקס הגלובלי ומעדכנים את שמות החנויות.
     const globalFormatted = Array.from(globalMap.values());
     if (globalFormatted.length) {
         await productsIndexGlobal.saveObjects(globalFormatted);
         console.log(`🌍 הועלו ${globalFormatted.length} מוצרים לאינדקס הגלובלי (products_index)`);
     }
 
-    // סנכרון שמות החנויות על בסיס הנתונים שירדו
     console.log(`\n🔄 מתחיל סנכרון שמות חנויות...`);
     for (const [chainId, records] of storeInfoMap.entries()) {
         const indexName = `products_${chainId}`;
@@ -337,8 +329,6 @@ async function updateGlobalPromotionStatus() {
         }
     }
     console.log('🏁 סיום עדכון שמות חנויות ב-Algolia.');
-
-    // קריאה לפונקציה לסנכרון סטטוס המבצעים
     await updateGlobalPromotionStatus();
 
     console.log('✅ כל הרשתות סונכרנו בהצלחה.');
