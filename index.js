@@ -7,6 +7,7 @@ import path from 'path';
 import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 import { chromium } from 'playwright';
+import https from 'https';
 
 dotenv.config();
 
@@ -17,6 +18,11 @@ const algoliaClient = algoliasearch(process.env.ALGOLIA_APP_ID, process.env.ALGO
 const logins = JSON.parse(fs.readFileSync('./logins.json', 'utf-8'));
 const parser = new XMLParser({ ignoreAttributes: false });
 const BASE_URL = 'https://url.publishedprices.co.il';
+
+// יצירת Agent להתעלמות משגיאות תעודה (SSL/TLS)
+const agent = new https.Agent({
+    rejectUnauthorized: false
+});
 
 /**
  * פונקציה שמאתרת את הקובץ העדכני ביותר מכל סוג (מחיר/מבצע/חנויות) עבור כל חנות/רשת.
@@ -198,6 +204,7 @@ async function updateGlobalPromotionStatus() {
                         headers: {
                             Cookie: `cftpSID=${cookie.value}`,
                         },
+                        agent: agent // הוספת ה-agent להתעלמות משגיאות תעודה
                     });
                     
                     const buffer = await downloadRes.buffer();
