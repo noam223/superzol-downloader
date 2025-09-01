@@ -2,9 +2,9 @@
   "name": "superzol-downloader",
   "version": "1.0.0",
   "type": "module",
-  "main": "download.js",
+  "main": "sync_to_algolia.js",
   "scripts": {
-    "start": "node download.js"
+    "start": "node sync_to_algolia.js"
   },
   "dependencies": {
     "node-fetch": "^2.6.7",
