@@ -146,6 +146,9 @@ async function updateGlobalPromotionStatus() {
     const storeInfoMap = new Map();
     
     const browser = await chromium.launch({ headless: true });
+    
+    // הגדרת userDir מחוץ לבלוק try כדי שיהיה זמין גם אחרי שהבלוק מסתיים
+    let userDir;
 
     try {
         // לולאה שעוברת על כל המשתמשים שהוגדרו בקובץ logins.json
@@ -192,7 +195,7 @@ async function updateGlobalPromotionStatus() {
 
                 console.log(`⬇️ ${username}: מוריד ${latestFiles.length} קבצים...`);
 
-                const userDir = path.join(process.cwd(), 'downloads', username);
+                userDir = path.join(process.cwd(), 'downloads', username);
                 fs.rmSync(userDir, { recursive: true, force: true });
                 fs.mkdirSync(userDir, { recursive: true });
 
